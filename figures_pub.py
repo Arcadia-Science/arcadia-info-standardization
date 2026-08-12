@@ -313,18 +313,20 @@ def set_arcadia_style(ax):
         label.set_fontfamily('Atkinson Hyperlegible Mono')
 
 
-def save_or_show(fig, save_path):
-    """Save figure in both PNG (300 DPI) and SVG formats, or display."""
-    if save_path:
-        # PNG at 300 DPI (Arcadia standard)
-        png_path = save_path if save_path.endswith('.png') else f"{save_path}.png"
-        fig.savefig(png_path, dpi=300, bbox_inches='tight')
-        print(f"  Saved: {png_path}")
+def save_figure(fig, save_path):
+    """Save a figure in PNG and SVG formats."""
+    png_path = save_path if save_path.endswith('.png') else f"{save_path}.png"
+    fig.savefig(png_path, dpi=300, bbox_inches='tight')
+    print(f"  Saved: {png_path}")
+    svg_path = png_path.rsplit('.', 1)[0] + '.svg'
+    fig.savefig(svg_path, bbox_inches='tight')
+    print(f"  Saved: {svg_path}")
 
-        # SVG (vector format for publication)
-        svg_path = png_path.rsplit('.', 1)[0] + '.svg'
-        fig.savefig(svg_path, bbox_inches='tight')
-        print(f"  Saved: {svg_path}")
+
+def save_or_show(fig, save_path):
+    """Save a figure or display it."""
+    if save_path:
+        save_figure(fig, save_path)
     else:
         plt.show()
     plt.close(fig)
@@ -496,7 +498,8 @@ def experiment_1(N=100_000, k_x=3, k_y=2, k_z_baseline=10,
 def experiment_2(N=100_000, k_x=3, k_y=2,
                  k_z_values=(6, 10, 30, 100),
                  strat_effect=0.0, noise=0.0,
-                 n_variants=1000, seed=42, save_path=None, show_legend=True):
+                 n_variants=1000, seed=42, save_path=None, show_legend=True,
+                 no_legend_save_path=None):
     """
     E2: Foundation experiment. Shows raw plugin MI and its relationship to G-statistic.
     """
@@ -588,7 +591,16 @@ def experiment_2(N=100_000, k_x=3, k_y=2,
 
     plt.tight_layout()
 
-    save_or_show(fig, save_path)
+    if save_path and no_legend_save_path:
+        save_figure(fig, save_path)
+        legend = axes[0, 1].get_legend()
+        if legend:
+            legend.remove()
+        plt.tight_layout()
+        save_figure(fig, no_legend_save_path)
+        plt.close(fig)
+    else:
+        save_or_show(fig, save_path)
 
 
 def experiment_4(k_x_values=(2, 3, 4, 5), k_y_values=(2, 3, 4, 5),
@@ -1511,14 +1523,11 @@ def main():
         experiment_2(
             n_variants=n_variants,
             save_path=os.path.join(args.save_dir, 'figure_2.png') if args.save_dir else None,
-            show_legend=True
+            show_legend=True,
+            no_legend_save_path=(
+                os.path.join(args.save_dir, 'figure_2_nolegend.png')
+                if args.save_dir else None)
         )
-        if args.save_dir:
-            experiment_2(
-                n_variants=n_variants,
-                save_path=os.path.join(args.save_dir, 'figure_2_nolegend.png'),
-                show_legend=False
-            )
 
     def generate_fig3():
         experiment_16(
