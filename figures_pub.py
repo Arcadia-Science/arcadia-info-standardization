@@ -1338,18 +1338,15 @@ def experiment_23(N_values=(5_000, 20_000, 100_000),
 # FIGURE 4: CUSTOM COMBINED FIGURE
 # =============================================================================
 
-def figure_4(save_path=None):
+def figure_4(n_variants=300, n_variants_exp5=2000, save_path=None):
     """
     Custom Figure 4: Combines exp4 right panel (left) + exp5 left panel (right).
     """
     print("  Figure 4: Custom combined figure (σ₀ consistency + df structure)...")
 
     # Parameters
-    k_x_values = (2, 3, 4, 5)
-    k_y_values = (2, 3, 4, 5)
     k_z_values = (6, 10, 20, 50, 100, 200)
     N = 100_000
-    n_variants = 300
     seed = 42
     strat_effect = 0.0
     noise = 0.0
@@ -1386,7 +1383,6 @@ def figure_4(save_path=None):
     # Generate data for left panel (from exp5)
     k_z_values_exp5 = (2, 3, 5, 6, 10, 15, 20, 30, 50, 100)
     N_exp5 = 10_000
-    n_variants_exp5 = 2000
     df_mi = chi2_df(k_x, k_y, 1)
     k_z_max_exp5 = max(k_z_values_exp5)
     C_exp5 = k_x * k_y * k_z_max_exp5
@@ -1551,6 +1547,8 @@ def main():
         2: ('figure_2', generate_fig2),
         3: ('figure_3', generate_fig3),
         4: ('figure_4', lambda: figure_4(
+            n_variants=FAST['n_variants'] if args.fast else 300,
+            n_variants_exp5=FAST['n_variants'] if args.fast else 2000,
             save_path=os.path.join(args.save_dir, 'figure_4.png') if args.save_dir else None
         )),
         5: ('figure_5', lambda: experiment_23(
