@@ -30,6 +30,20 @@ import argparse
 import os
 import time
 
+from dn_mi import (
+    build_3d_table,
+    chi2_df,
+    coarsen_partition,
+    correct_basharin,
+    g_statistic,
+    mi_to_z,
+    mi_to_z_cdf,
+    partition_into_k,
+    plugin_mi_2d,
+    plugin_mi_3d,
+    sigma0_prediction,
+)
+
 
 # =============================================================================
 # CONSTANTS AND DEFAULTS
@@ -77,102 +91,6 @@ DEFAULTS = dict(
 FAST = dict(n_variants=100, n_perm_variants=20, n_perms=10)
 
 
-# =============================================================================
-# CORE ESTIMATORS
-# =============================================================================
-
-def plugin_mi_2d(table):
-    """Plugin MI estimator for a 2D contingency table, in bits."""
-    table = table.astype(float)
-    n = table.sum()
-    if n == 0:
-        return 0.0
-    p_xy = table / n
-    p_x = p_xy.sum(axis=1)
-    p_y = p_xy.sum(axis=0)
-    mi = 0.0
-    for i in range(table.shape[0]):
-        for j in range(table.shape[1]):
-            if p_xy[i, j] > 0 and p_x[i] > 0 and p_y[j] > 0:
-                mi += p_xy[i, j] * np.log2(p_xy[i, j] / (p_x[i] * p_y[j]))
-    return max(mi, 0.0)
-
-
-def plugin_mi_3d(table):
-    """Plugin CMI estimator: I(X;Y|Z) = sum_k p(z=k) * MI_k, in bits."""
-    n_total = table.sum()
-    if n_total == 0:
-        return 0.0
-    mi = 0.0
-    for k in range(table.shape[2]):
-        sl = table[:, :, k]
-        n_k = sl.sum()
-        if n_k > 0:
-            mi += (n_k / n_total) * plugin_mi_2d(sl)
-    return mi
-
-
-def chi2_df(k_x, k_y, k_z=1):
-    """df = (k_x-1)(k_y-1)*k_z for the chi-squared null of plugin MI/CMI."""
-    return (k_x - 1) * (k_y - 1) * k_z
-
-
-def sigma0_prediction(k_x, k_y):
-    """
-    sigma_0 from chi-squared variance:
-    sigma_0 = sqrt(2(k_x-1)(k_y-1) / (k_x*k_y*(2*ln2)^2))
-    """
-    return np.sqrt(2.0 * (k_x - 1) * (k_y - 1) /
-                   (k_x * k_y * (2.0 * np.log(2)) ** 2))
-
-
-def basharin_bias(k_x, k_y, k_z, N):
-    """E[MI_plugin | H0] = df/(2N*ln2)."""
-    return chi2_df(k_x, k_y, k_z) / (2 * N * np.log(2))
-
-
-def correct_basharin(mi, k_x, k_y, k_z, N):
-    return mi - basharin_bias(k_x, k_y, k_z, N)
-
-
-def g_statistic(mi, N):
-    """G = 2N*ln(2)*MI_plugin."""
-    return 2 * N * np.log(2) * mi
-
-
-# =============================================================================
-# TRANSFORMATION FUNCTIONS
-# =============================================================================
-
-def mi_to_z(mi, k_x, k_y, k_z, N):
-    """
-    DN-basic: z = (G - df) / sqrt(2*df)
-
-    Corrects mean and variance but NOT skewness.
-    """
-    G = 2 * N * np.log(2) * mi
-    df = chi2_df(k_x, k_y, k_z)
-    return (G - df) / np.sqrt(2.0 * df)
-
-
-def mi_to_z_cdf(mi, k_x, k_y, k_z, N):
-    """
-    CDF transform: z = Φ⁻¹(F_χ²(df)(G))
-
-    Exact N(0,1) transformation correcting ALL moments.
-    Recommended for cross-K comparability and interaction detection.
-
-    Uses theoretical chi-squared CDF (no fitting required).
-    """
-    G = 2 * N * np.log(2) * mi
-    df = chi2_df(k_x, k_y, k_z)
-    p = stats.chi2.cdf(G, df)
-    # Handle edge cases for numerical stability
-    p = np.clip(p, 1e-15, 1 - 1e-15)
-    z = stats.norm.ppf(p)
-    return z
-
-
 def chi2_quantiles_dn(probs, df):
     """Quantiles of standardized chi-squared: (chi2(df)-df)/sqrt(2*df)."""
     q = stats.chi2.ppf(probs, df)
@@ -183,24 +101,7 @@ def chi2_quantiles_dn(probs, df):
 # DATA GENERATION
 # =============================================================================
 
-def partition_into_k(N, k_z, rng):
-    p = np.repeat(np.arange(k_z), N // k_z + 1)[:N]
-    rng.shuffle(p)
-    return p
-
-
-def coarsen_partition(p_max, k_z_max, k_z):
-    return (p_max * k_z // k_z_max).astype(int)
-
-
-def build_3d_table(g, d, p, k_x, k_y, k_z):
-    table = np.zeros((k_x, k_y, k_z), dtype=float)
-    for i in range(len(g)):
-        table[g[i], d[i], p[i]] += 1
-    return table
-
-
-def generate_null(N, k_x, k_z_max, strat_effect, noise, rng):
+def generate_figure_null(N, k_x, k_z_max, strat_effect, noise, rng):
     """
     Null variant: G and D independent given partition.
     """
@@ -276,7 +177,7 @@ def compute_2x2_probs_with_mi(true_mi_bits, rng):
     return p
 
 
-def generate_2x2_with_mi(N, true_mi_bits, rng):
+def generate_figure_2x2_with_mi(N, true_mi_bits, rng):
     """
     Generate a 2x2 contingency table with exact MI.
     """
@@ -478,7 +379,8 @@ def experiment_1(N=100_000, k_x=3, k_y=2, k_z_baseline=10,
         }
 
     for _ in range(n_variants):
-        g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng)
+        g, d, p_max = generate_figure_null(
+            N, k_x, k_z_max, strat_effect, noise, rng)
         p_base = coarsen_partition(p_max, k_z_max, k_z_baseline)
         tbl_base = build_3d_table(g, d, p_base, k_x, k_y, k_z_baseline)
         mi_raw_base = plugin_mi_3d(tbl_base)
@@ -606,7 +508,8 @@ def experiment_2(N=100_000, k_x=3, k_y=2,
     MI_by_kz = {k_z: [] for k_z in k_z_values}
 
     for _ in range(n_variants):
-        g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng)
+        g, d, p_max = generate_figure_null(
+            N, k_x, k_z_max, strat_effect, noise, rng)
         for k_z in k_z_values:
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
@@ -717,7 +620,8 @@ def experiment_4(k_x_values=(2, 3, 4, 5), k_y_values=(2, 3, 4, 5),
         rng2 = np.random.default_rng(seed + k_z)
         all_mi_b = []
         for _ in range(n_total):
-            g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng2)
+            g, d, p_max = generate_figure_null(
+                N, k_x, k_z_max, strat_effect, noise, rng2)
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
             mi_r = plugin_mi_3d(tbl)
@@ -875,7 +779,8 @@ def experiment_6_5(N=100_000, k_x=3, k_y=2,
     for i in range(n_variants):
         if i % 1000 == 0:
             print(f"      {i}/{n_variants}...")
-        g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng)
+        g, d, p_max = generate_figure_null(
+            N, k_x, k_z_max, strat_effect, noise, rng)
 
         for k_z in k_z_values:
             p_k = coarsen_partition(p_max, k_z_max, k_z)
@@ -1097,7 +1002,8 @@ def experiment_16(k_x=3, k_y=2, k_z=6,
         print(f"    N={N:,}...")
         rng_N = np.random.default_rng(seed + N)
         for _ in range(n_variants):
-            g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng_N)
+            g, d, p_max = generate_figure_null(
+                N, k_x, k_z_max, strat_effect, noise, rng_N)
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
             mi = plugin_mi_3d(tbl)
@@ -1201,7 +1107,7 @@ def experiment_20(N_values=(1000, 2000, 5000, 20000),
             rej_perm = 0
 
             for _ in range(n_reps):
-                table = generate_2x2_with_mi(N, true_mi, rng)
+                table = generate_figure_2x2_with_mi(N, true_mi, rng)
 
                 # DN test (using chi-squared on G)
                 t0 = time_module.time()
@@ -1336,7 +1242,8 @@ def experiment_23(N_values=(5_000, 20_000, 100_000),
             z_values = []
 
             for _ in range(n_variants):
-                g, d, p = generate_null(N, k_x, k_z, strat_effect, noise, rng)
+                g, d, p = generate_figure_null(
+                    N, k_x, k_z, strat_effect, noise, rng)
                 tbl = build_3d_table(g, d, p, k_x, k_y, k_z)
                 mi = plugin_mi_3d(tbl)
                 z = mi_to_z_cdf(mi, k_x, k_y, k_z, N)
@@ -1450,7 +1357,8 @@ def figure_4(save_path=None):
         rng2 = np.random.default_rng(seed + k_z)
         all_mi_b = []
         for _ in range(n_total):
-            g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng2)
+            g, d, p_max = generate_figure_null(
+                N, k_x, k_z_max, strat_effect, noise, rng2)
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
             mi_r = plugin_mi_3d(tbl)
