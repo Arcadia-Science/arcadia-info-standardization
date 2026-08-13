@@ -48,6 +48,7 @@ python figures_pub.py --experiments 1 2 3 --save-dir figures/
 ```
 
 Each figure is accompanied by an NPZ results file.
+The output directory also contains `run_metadata.json` with the parameters, commit, and software versions.
 
 ## Running Tests
 

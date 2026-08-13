@@ -22,15 +22,22 @@ Usage
   python figures.py --fast
 """
 
-import numpy as np
-from scipy import stats
-import matplotlib.pyplot as plt
-import matplotlib as mpl
 import argparse
+import json
 import os
+import platform
+import subprocess
 import time
+from datetime import datetime, timezone
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+from scipy import stats
 
 from dn_mi import (
+    __version__ as dn_mi_version,
     build_3d_table,
     chi2_df,
     coarsen_partition,
@@ -1592,6 +1599,35 @@ def figure_4(n_variants=300, n_variants_exp5=2000, save_path=None):
 # MAIN FUNCTION
 # =============================================================================
 
+def save_run_metadata(save_dir, args, effective_parameters):
+    commit = subprocess.run(
+        ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
+        check=False).stdout.strip() or None
+    dirty = bool(subprocess.run(
+        ['git', 'status', '--porcelain'], capture_output=True, text=True,
+        check=False).stdout.strip())
+    metadata = {
+        'arguments': vars(args),
+        'effective_parameters': effective_parameters,
+        'generated_at_utc': datetime.now(timezone.utc).isoformat(),
+        'git_commit': commit,
+        'git_dirty': dirty,
+        'platform': platform.platform(),
+        'python': platform.python_version(),
+        'versions': {
+            'dn_mi': dn_mi_version,
+            'matplotlib': mpl.__version__,
+            'numpy': np.__version__,
+            'scipy': scipy.__version__,
+        },
+    }
+    metadata_path = os.path.join(save_dir, 'run_metadata.json')
+    with open(metadata_path, 'w', encoding='utf-8') as handle:
+        json.dump(metadata, handle, indent=2, sort_keys=True)
+        handle.write('\n')
+    print(f"Saved run metadata to: {metadata_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate publication figures for DN-MI paper')
@@ -1618,6 +1654,18 @@ def main():
     else:
         n_variants = DEFAULTS['n_variants']
         n_variants_tail = 10_000
+
+    if args.save_dir:
+        save_run_metadata(args.save_dir, args, {
+            'figure_4_n_variants': FAST['n_variants'] if args.fast else 300,
+            'figure_4_n_variants_exp5': (
+                FAST['n_variants'] if args.fast else 2000),
+            'n_variants': n_variants,
+            'n_variants_tail': n_variants_tail,
+            'n_perms': FAST['n_perms'] * 10 if args.fast else 200,
+            'n_reps': FAST['n_perm_variants'] if args.fast else 100,
+            'seed': DEFAULTS['seed'],
+        })
 
     # Helper functions to generate figures with and without legends
     def generate_fig2():
