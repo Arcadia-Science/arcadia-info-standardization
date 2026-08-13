@@ -332,6 +332,13 @@ def save_or_show(fig, save_path):
     plt.close(fig)
 
 
+def save_results(save_path, **results):
+    if save_path:
+        result_path = os.path.splitext(save_path)[0] + '.npz'
+        np.savez_compressed(result_path, **results)
+        print(f"  Saved: {result_path}")
+
+
 def qq_scatter(ax, x, y, color='steelblue', s=20, alpha=0.5):
     """Scatter QQ plot with y=x reference line and equal axes."""
     ax.scatter(x, y, s=s, alpha=alpha, color=color, zorder=3)
@@ -492,6 +499,19 @@ def experiment_1(N=100_000, k_x=3, k_y=2, k_z_baseline=10,
 
     plt.tight_layout()
 
+    archived = {
+        'N': N, 'k_x': k_x, 'k_y': k_y, 'k_z_baseline': k_z_baseline,
+        'k_z_values': k_z_values, 'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({
+        f'{method}_{measure}_kz_{k_z}': np.asarray(values)
+        for method, method_results in methods.items()
+        for measure, by_kz in method_results.items()
+        for k_z, values in by_kz.items()
+    })
+    save_results(save_path, **archived)
+
     save_or_show(fig, save_path)
 
 
@@ -590,6 +610,17 @@ def experiment_2(N=100_000, k_x=3, k_y=2,
             ax_dist.set_xticklabels(new_labels)
 
     plt.tight_layout()
+
+    archived = {
+        'N': N, 'k_x': k_x, 'k_y': k_y, 'k_z_values': k_z_values,
+        'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({f'G_kz_{k_z}': values
+                     for k_z, values in G_by_kz.items()})
+    archived.update({f'MI_kz_{k_z}': values
+                     for k_z, values in MI_by_kz.items()})
+    save_results(save_path, **archived)
 
     if save_path and no_legend_save_path:
         save_figure(fig, save_path)
@@ -691,6 +722,14 @@ def experiment_4(k_x_values=(2, 3, 4, 5), k_y_values=(2, 3, 4, 5),
     set_arcadia_style(ax)
 
     plt.tight_layout()
+    archived = {
+        'N': N, 'k_x_values': k_x_values, 'k_y_values': k_y_values,
+        'k_z_values': k_z_values, 'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise, 'sigma0_prediction': mat,
+    }
+    archived.update({f'sigma0_kz_{k_z}': values
+                     for k_z, values in emp_sigma0_by_kz.items()})
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 
@@ -769,6 +808,10 @@ def experiment_5(k_x=3, k_y=2,
     ax.set_ylim([-5, 5])
 
     plt.tight_layout()
+    save_results(
+        save_path, N=N, k_x=k_x, k_y=k_y, k_z_values=k_z_arr,
+        n_variants=n_variants, seed=seed, df_pred=df_pred,
+        df_mean=df_mean, df_var=df_var, df_mle=df_mle)
     save_or_show(fig, save_path)
 
 
@@ -893,6 +936,17 @@ def experiment_6_5(N=100_000, k_x=3, k_y=2,
                 ax.set_aspect('equal', adjustable='datalim')
 
     plt.tight_layout()
+    archived = {
+        'N': N, 'k_x': k_x, 'k_y': k_y, 'k_z_values': k_z_values,
+        'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({
+        f'{method}_kz_{k_z}': values
+        for method, by_kz in results.items()
+        for k_z, values in by_kz.items()
+    })
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 
@@ -992,6 +1046,11 @@ def experiment_6_7(k_x=3, k_y=2, k_z_values=(6, 10, 30, 50, 70),
                            fontsize=14)
 
     plt.tight_layout()
+    save_results(
+        save_path, k_x=k_x, k_y=k_y, N_values=N_values,
+        k_z_values=k_z_values, n_variants=n_variants, seed=seed,
+        ks_statistics=ks_stats, ks_pvalues=ks_pvalues,
+        expected_counts=expected_counts)
     save_or_show(fig, save_path)
 
 
@@ -1093,6 +1152,15 @@ def experiment_16(k_x=3, k_y=2, k_z=6,
             ax_dist.set_xticklabels(new_labels)
 
     plt.tight_layout()
+
+    archived = {
+        'k_x': k_x, 'k_y': k_y, 'k_z': k_z, 'N_values': N_values,
+        'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({f'G_N_{N}': values for N, values in G_by_N.items()})
+    archived.update({f'MI_N_{N}': values for N, values in MI_by_N.items()})
+    save_results(save_path, **archived)
 
     save_or_show(fig, save_path)
 
@@ -1231,6 +1299,19 @@ def experiment_20(N_values=(1000, 2000, 5000, 20000),
     set_arcadia_style(ax)
 
     plt.tight_layout()
+    archived = {
+        'N_values': N_values, 'true_mi_values': true_mi_values,
+        'k_x': k_x, 'k_y': k_y, 'n_reps': n_reps, 'n_perms': n_perms,
+        'alpha': alpha, 'seed': seed,
+    }
+    for N in N_values:
+        for true_mi in true_mi_values:
+            key = f'N_{N}_mi_{true_mi:g}'.replace('.', 'p')
+            archived[f'dn_pvalues_{key}'] = results_dn[N][true_mi]['pvals']
+            archived[f'perm_pvalues_{key}'] = results_perm[N][true_mi]['pvals']
+            archived[f'dn_power_{key}'] = results_dn[N][true_mi]['power']
+            archived[f'perm_power_{key}'] = results_perm[N][true_mi]['power']
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 
@@ -1330,6 +1411,19 @@ def experiment_23(N_values=(5_000, 20_000, 100_000),
             set_arcadia_style(ax)
 
     plt.tight_layout()
+
+    archived = {
+        'N_values': N_values, 'k_z_values': k_z_values, 'k_x': k_x,
+        'k_y': k_y, 'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    for (N, k_z), result in results.items():
+        prefix = f'N_{N}_kz_{k_z}'
+        archived[f'z_values_{prefix}'] = result['z_values']
+        for name in ('mean', 'std', 'skewness', 'kurtosis', 'ks_stat',
+                     'ks_p', 'df'):
+            archived[f'{name}_{prefix}'] = result[name]
+    save_results(save_path, **archived)
 
     save_or_show(fig1, save_path)
 
@@ -1480,6 +1574,17 @@ def figure_4(n_variants=300, n_variants_exp5=2000, save_path=None):
     set_arcadia_style(ax)
 
     plt.tight_layout()
+    archived = {
+        'N': N, 'N_exp5': N_exp5, 'k_z_values': k_z_values,
+        'k_z_values_exp5': k_z_values_exp5, 'n_variants': n_variants,
+        'n_variants_exp5': n_variants_exp5, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+        'df_pred': df_pred, 'df_mean': df_mean, 'df_var': df_var,
+        'df_mle': df_mle,
+    }
+    archived.update({f'sigma0_kz_{k_z}': values
+                     for k_z, values in emp_sigma0_by_kz.items()})
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 

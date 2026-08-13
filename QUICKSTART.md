@@ -47,6 +47,8 @@ python figures_pub.py --save-dir publication_figures/
 python figures_pub.py --experiments 1 2 3 --save-dir figures/
 ```
 
+Each figure is accompanied by an NPZ results file.
+
 ## Running Tests
 
 ```bash

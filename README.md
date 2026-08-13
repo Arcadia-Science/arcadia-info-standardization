@@ -83,6 +83,7 @@ python figures_pub.py --save-dir figures/
 ```
 
 This generates 8 publication-quality figures demonstrating the CDF transform's properties.
+Each figure also includes a compressed NPZ file containing its numerical results.
 
 ## Citation
 
