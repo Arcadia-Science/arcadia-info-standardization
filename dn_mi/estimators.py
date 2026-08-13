@@ -138,5 +138,6 @@ def g_statistic(mi, N):
     >>> N = 1000
     >>> G = g_statistic(mi, N)
     >>> print(f"G = {G:.2f}")
+    G = 138.63
     """
     return 2 * N * np.log(2) * mi
