@@ -106,8 +106,9 @@ cd arcadia-info-standardization
 ### Step 2: Install Requirements
 
 ```bash
-# Install only what's needed for figures
-pip install numpy scipy matplotlib
+# Reproduce figures with the validated Python 3.11 environment
+pip install -r requirements-lock.txt
+pip install -e . --no-deps
 ```
 
 ### Step 3: Run Figure Script
