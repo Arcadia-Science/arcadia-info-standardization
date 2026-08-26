@@ -74,8 +74,7 @@ def build_3d_table(g, d, p, k_x, k_y, k_z):
         3D contingency table with counts
     """
     table = np.zeros((k_x, k_y, k_z), dtype=float)
-    for i in range(len(g)):
-        table[g[i], d[i], p[i]] += 1
+    np.add.at(table, (g, d, p), 1)
     return table
 
 

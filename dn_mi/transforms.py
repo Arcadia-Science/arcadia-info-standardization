@@ -162,12 +162,15 @@ def mi_to_z_cdf(mi, k_x, k_y, k_z, N):
     >>> import numpy as np
     >>>
     >>> # Generate null data (independent X, Y given Z)
-    >>> table = np.random.randint(0, 50, size=(3, 2, 10))
+    >>> rng = np.random.default_rng(42)
+    >>> counts = rng.multinomial(10_000, np.ones(60) / 60)
+    >>> table = counts.reshape(3, 2, 10)
     >>> mi = plugin_mi_3d(table)
     >>> z = mi_to_z_cdf(mi, k_x=3, k_y=2, k_z=10, N=table.sum())
     >>>
     >>> # z should be ~N(0,1) under null
     >>> print(f"z = {z:.3f}")
+    z = -0.328
 
     References
     ----------

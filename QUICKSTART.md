@@ -47,6 +47,9 @@ python figures_pub.py --save-dir publication_figures/
 python figures_pub.py --experiments 1 2 3 --save-dir figures/
 ```
 
+Each figure is accompanied by an NPZ results file.
+The output directory also contains `run_metadata.json` with the parameters, commit, and software versions.
+
 ## Running Tests
 
 ```bash
@@ -88,8 +91,8 @@ from scipy import stats
 mi = plugin_mi_3d(table)
 z = mi_to_z_cdf(mi, k_x, k_y, k_z, N)
 
-# Two-tailed test
-p_value = 2 * (1 - stats.norm.cdf(abs(z)))
+# Upper-tail test for association
+p_value = stats.norm.sf(z)
 print(f"p-value: {p_value:.4e}")
 ```
 

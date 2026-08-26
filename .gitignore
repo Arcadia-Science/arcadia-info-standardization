@@ -47,6 +47,8 @@ figures/
 *.png
 *.svg
 *.pdf
+*.npz
+run_metadata.json
 
 # OS
 .DS_Store

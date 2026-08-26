@@ -1,0 +1,17 @@
+# Validated with Python 3.11
+contourpy==1.2.0
+cycler==0.12.1
+fonttools==4.49.0
+iniconfig==2.3.0
+kiwisolver==1.4.5
+matplotlib==3.10.8
+numpy==1.26.4
+packaging==26.2
+pillow==10.2.0
+pluggy==1.6.0
+pygments==2.19.2
+pyparsing==3.1.2
+pytest==9.0.3
+python-dateutil==2.9.0.post0
+scipy==1.14.1
+six==1.16.0

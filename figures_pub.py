@@ -22,13 +22,34 @@ Usage
   python figures.py --fast
 """
 
-import numpy as np
-from scipy import stats
-import matplotlib.pyplot as plt
-import matplotlib as mpl
 import argparse
+import json
 import os
+import platform
+import subprocess
 import time
+from datetime import datetime, timezone
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+from scipy import stats
+
+from dn_mi import (
+    __version__ as dn_mi_version,
+    build_3d_table,
+    chi2_df,
+    coarsen_partition,
+    correct_basharin,
+    g_statistic,
+    mi_to_z,
+    mi_to_z_cdf,
+    partition_into_k,
+    plugin_mi_2d,
+    plugin_mi_3d,
+    sigma0_prediction,
+)
 
 
 # =============================================================================
@@ -77,102 +98,6 @@ DEFAULTS = dict(
 FAST = dict(n_variants=100, n_perm_variants=20, n_perms=10)
 
 
-# =============================================================================
-# CORE ESTIMATORS
-# =============================================================================
-
-def plugin_mi_2d(table):
-    """Plugin MI estimator for a 2D contingency table, in bits."""
-    table = table.astype(float)
-    n = table.sum()
-    if n == 0:
-        return 0.0
-    p_xy = table / n
-    p_x = p_xy.sum(axis=1)
-    p_y = p_xy.sum(axis=0)
-    mi = 0.0
-    for i in range(table.shape[0]):
-        for j in range(table.shape[1]):
-            if p_xy[i, j] > 0 and p_x[i] > 0 and p_y[j] > 0:
-                mi += p_xy[i, j] * np.log2(p_xy[i, j] / (p_x[i] * p_y[j]))
-    return max(mi, 0.0)
-
-
-def plugin_mi_3d(table):
-    """Plugin CMI estimator: I(X;Y|Z) = sum_k p(z=k) * MI_k, in bits."""
-    n_total = table.sum()
-    if n_total == 0:
-        return 0.0
-    mi = 0.0
-    for k in range(table.shape[2]):
-        sl = table[:, :, k]
-        n_k = sl.sum()
-        if n_k > 0:
-            mi += (n_k / n_total) * plugin_mi_2d(sl)
-    return mi
-
-
-def chi2_df(k_x, k_y, k_z=1):
-    """df = (k_x-1)(k_y-1)*k_z for the chi-squared null of plugin MI/CMI."""
-    return (k_x - 1) * (k_y - 1) * k_z
-
-
-def sigma0_prediction(k_x, k_y):
-    """
-    sigma_0 from chi-squared variance:
-    sigma_0 = sqrt(2(k_x-1)(k_y-1) / (k_x*k_y*(2*ln2)^2))
-    """
-    return np.sqrt(2.0 * (k_x - 1) * (k_y - 1) /
-                   (k_x * k_y * (2.0 * np.log(2)) ** 2))
-
-
-def basharin_bias(k_x, k_y, k_z, N):
-    """E[MI_plugin | H0] = df/(2N*ln2)."""
-    return chi2_df(k_x, k_y, k_z) / (2 * N * np.log(2))
-
-
-def correct_basharin(mi, k_x, k_y, k_z, N):
-    return mi - basharin_bias(k_x, k_y, k_z, N)
-
-
-def g_statistic(mi, N):
-    """G = 2N*ln(2)*MI_plugin."""
-    return 2 * N * np.log(2) * mi
-
-
-# =============================================================================
-# TRANSFORMATION FUNCTIONS
-# =============================================================================
-
-def mi_to_z(mi, k_x, k_y, k_z, N):
-    """
-    DN-basic: z = (G - df) / sqrt(2*df)
-
-    Corrects mean and variance but NOT skewness.
-    """
-    G = 2 * N * np.log(2) * mi
-    df = chi2_df(k_x, k_y, k_z)
-    return (G - df) / np.sqrt(2.0 * df)
-
-
-def mi_to_z_cdf(mi, k_x, k_y, k_z, N):
-    """
-    CDF transform: z = Φ⁻¹(F_χ²(df)(G))
-
-    Exact N(0,1) transformation correcting ALL moments.
-    Recommended for cross-K comparability and interaction detection.
-
-    Uses theoretical chi-squared CDF (no fitting required).
-    """
-    G = 2 * N * np.log(2) * mi
-    df = chi2_df(k_x, k_y, k_z)
-    p = stats.chi2.cdf(G, df)
-    # Handle edge cases for numerical stability
-    p = np.clip(p, 1e-15, 1 - 1e-15)
-    z = stats.norm.ppf(p)
-    return z
-
-
 def chi2_quantiles_dn(probs, df):
     """Quantiles of standardized chi-squared: (chi2(df)-df)/sqrt(2*df)."""
     q = stats.chi2.ppf(probs, df)
@@ -183,24 +108,7 @@ def chi2_quantiles_dn(probs, df):
 # DATA GENERATION
 # =============================================================================
 
-def partition_into_k(N, k_z, rng):
-    p = np.repeat(np.arange(k_z), N // k_z + 1)[:N]
-    rng.shuffle(p)
-    return p
-
-
-def coarsen_partition(p_max, k_z_max, k_z):
-    return (p_max * k_z // k_z_max).astype(int)
-
-
-def build_3d_table(g, d, p, k_x, k_y, k_z):
-    table = np.zeros((k_x, k_y, k_z), dtype=float)
-    for i in range(len(g)):
-        table[g[i], d[i], p[i]] += 1
-    return table
-
-
-def generate_null(N, k_x, k_z_max, strat_effect, noise, rng):
+def generate_figure_null(N, k_x, k_z_max, strat_effect, noise, rng):
     """
     Null variant: G and D independent given partition.
     """
@@ -276,7 +184,7 @@ def compute_2x2_probs_with_mi(true_mi_bits, rng):
     return p
 
 
-def generate_2x2_with_mi(N, true_mi_bits, rng):
+def generate_figure_2x2_with_mi(N, true_mi_bits, rng):
     """
     Generate a 2x2 contingency table with exact MI.
     """
@@ -412,21 +320,30 @@ def set_arcadia_style(ax):
         label.set_fontfamily('Atkinson Hyperlegible Mono')
 
 
-def save_or_show(fig, save_path):
-    """Save figure in both PNG (300 DPI) and SVG formats, or display."""
-    if save_path:
-        # PNG at 300 DPI (Arcadia standard)
-        png_path = save_path if save_path.endswith('.png') else f"{save_path}.png"
-        fig.savefig(png_path, dpi=300, bbox_inches='tight')
-        print(f"  Saved: {png_path}")
+def save_figure(fig, save_path):
+    """Save a figure in PNG and SVG formats."""
+    png_path = save_path if save_path.endswith('.png') else f"{save_path}.png"
+    fig.savefig(png_path, dpi=300, bbox_inches='tight')
+    print(f"  Saved: {png_path}")
+    svg_path = png_path.rsplit('.', 1)[0] + '.svg'
+    fig.savefig(svg_path, bbox_inches='tight')
+    print(f"  Saved: {svg_path}")
 
-        # SVG (vector format for publication)
-        svg_path = png_path.rsplit('.', 1)[0] + '.svg'
-        fig.savefig(svg_path, bbox_inches='tight')
-        print(f"  Saved: {svg_path}")
+
+def save_or_show(fig, save_path):
+    """Save a figure or display it."""
+    if save_path:
+        save_figure(fig, save_path)
     else:
         plt.show()
     plt.close(fig)
+
+
+def save_results(save_path, **results):
+    if save_path:
+        result_path = os.path.splitext(save_path)[0] + '.npz'
+        np.savez_compressed(result_path, **results)
+        print(f"  Saved: {result_path}")
 
 
 def qq_scatter(ax, x, y, color='steelblue', s=20, alpha=0.5):
@@ -478,7 +395,8 @@ def experiment_1(N=100_000, k_x=3, k_y=2, k_z_baseline=10,
         }
 
     for _ in range(n_variants):
-        g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng)
+        g, d, p_max = generate_figure_null(
+            N, k_x, k_z_max, strat_effect, noise, rng)
         p_base = coarsen_partition(p_max, k_z_max, k_z_baseline)
         tbl_base = build_3d_table(g, d, p_base, k_x, k_y, k_z_baseline)
         mi_raw_base = plugin_mi_3d(tbl_base)
@@ -588,13 +506,27 @@ def experiment_1(N=100_000, k_x=3, k_y=2, k_z_baseline=10,
 
     plt.tight_layout()
 
+    archived = {
+        'N': N, 'k_x': k_x, 'k_y': k_y, 'k_z_baseline': k_z_baseline,
+        'k_z_values': k_z_values, 'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({
+        f'{method}_{measure}_kz_{k_z}': np.asarray(values)
+        for method, method_results in methods.items()
+        for measure, by_kz in method_results.items()
+        for k_z, values in by_kz.items()
+    })
+    save_results(save_path, **archived)
+
     save_or_show(fig, save_path)
 
 
 def experiment_2(N=100_000, k_x=3, k_y=2,
                  k_z_values=(6, 10, 30, 100),
                  strat_effect=0.0, noise=0.0,
-                 n_variants=1000, seed=42, save_path=None, show_legend=True):
+                 n_variants=1000, seed=42, save_path=None, show_legend=True,
+                 no_legend_save_path=None):
     """
     E2: Foundation experiment. Shows raw plugin MI and its relationship to G-statistic.
     """
@@ -606,7 +538,8 @@ def experiment_2(N=100_000, k_x=3, k_y=2,
     MI_by_kz = {k_z: [] for k_z in k_z_values}
 
     for _ in range(n_variants):
-        g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng)
+        g, d, p_max = generate_figure_null(
+            N, k_x, k_z_max, strat_effect, noise, rng)
         for k_z in k_z_values:
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
@@ -685,7 +618,27 @@ def experiment_2(N=100_000, k_x=3, k_y=2,
 
     plt.tight_layout()
 
-    save_or_show(fig, save_path)
+    archived = {
+        'N': N, 'k_x': k_x, 'k_y': k_y, 'k_z_values': k_z_values,
+        'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({f'G_kz_{k_z}': values
+                     for k_z, values in G_by_kz.items()})
+    archived.update({f'MI_kz_{k_z}': values
+                     for k_z, values in MI_by_kz.items()})
+    save_results(save_path, **archived)
+
+    if save_path and no_legend_save_path:
+        save_figure(fig, save_path)
+        legend = axes[0, 1].get_legend()
+        if legend:
+            legend.remove()
+        plt.tight_layout()
+        save_figure(fig, no_legend_save_path)
+        plt.close(fig)
+    else:
+        save_or_show(fig, save_path)
 
 
 def experiment_4(k_x_values=(2, 3, 4, 5), k_y_values=(2, 3, 4, 5),
@@ -717,7 +670,8 @@ def experiment_4(k_x_values=(2, 3, 4, 5), k_y_values=(2, 3, 4, 5),
         rng2 = np.random.default_rng(seed + k_z)
         all_mi_b = []
         for _ in range(n_total):
-            g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng2)
+            g, d, p_max = generate_figure_null(
+                N, k_x, k_z_max, strat_effect, noise, rng2)
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
             mi_r = plugin_mi_3d(tbl)
@@ -775,6 +729,14 @@ def experiment_4(k_x_values=(2, 3, 4, 5), k_y_values=(2, 3, 4, 5),
     set_arcadia_style(ax)
 
     plt.tight_layout()
+    archived = {
+        'N': N, 'k_x_values': k_x_values, 'k_y_values': k_y_values,
+        'k_z_values': k_z_values, 'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise, 'sigma0_prediction': mat,
+    }
+    archived.update({f'sigma0_kz_{k_z}': values
+                     for k_z, values in emp_sigma0_by_kz.items()})
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 
@@ -853,6 +815,10 @@ def experiment_5(k_x=3, k_y=2,
     ax.set_ylim([-5, 5])
 
     plt.tight_layout()
+    save_results(
+        save_path, N=N, k_x=k_x, k_y=k_y, k_z_values=k_z_arr,
+        n_variants=n_variants, seed=seed, df_pred=df_pred,
+        df_mean=df_mean, df_var=df_var, df_mle=df_mle)
     save_or_show(fig, save_path)
 
 
@@ -875,7 +841,8 @@ def experiment_6_5(N=100_000, k_x=3, k_y=2,
     for i in range(n_variants):
         if i % 1000 == 0:
             print(f"      {i}/{n_variants}...")
-        g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng)
+        g, d, p_max = generate_figure_null(
+            N, k_x, k_z_max, strat_effect, noise, rng)
 
         for k_z in k_z_values:
             p_k = coarsen_partition(p_max, k_z_max, k_z)
@@ -976,6 +943,17 @@ def experiment_6_5(N=100_000, k_x=3, k_y=2,
                 ax.set_aspect('equal', adjustable='datalim')
 
     plt.tight_layout()
+    archived = {
+        'N': N, 'k_x': k_x, 'k_y': k_y, 'k_z_values': k_z_values,
+        'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({
+        f'{method}_kz_{k_z}': values
+        for method, by_kz in results.items()
+        for k_z, values in by_kz.items()
+    })
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 
@@ -1075,6 +1053,11 @@ def experiment_6_7(k_x=3, k_y=2, k_z_values=(6, 10, 30, 50, 70),
                            fontsize=14)
 
     plt.tight_layout()
+    save_results(
+        save_path, k_x=k_x, k_y=k_y, N_values=N_values,
+        k_z_values=k_z_values, n_variants=n_variants, seed=seed,
+        ks_statistics=ks_stats, ks_pvalues=ks_pvalues,
+        expected_counts=expected_counts)
     save_or_show(fig, save_path)
 
 
@@ -1097,7 +1080,8 @@ def experiment_16(k_x=3, k_y=2, k_z=6,
         print(f"    N={N:,}...")
         rng_N = np.random.default_rng(seed + N)
         for _ in range(n_variants):
-            g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng_N)
+            g, d, p_max = generate_figure_null(
+                N, k_x, k_z_max, strat_effect, noise, rng_N)
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
             mi = plugin_mi_3d(tbl)
@@ -1176,6 +1160,15 @@ def experiment_16(k_x=3, k_y=2, k_z=6,
 
     plt.tight_layout()
 
+    archived = {
+        'k_x': k_x, 'k_y': k_y, 'k_z': k_z, 'N_values': N_values,
+        'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    archived.update({f'G_N_{N}': values for N, values in G_by_N.items()})
+    archived.update({f'MI_N_{N}': values for N, values in MI_by_N.items()})
+    save_results(save_path, **archived)
+
     save_or_show(fig, save_path)
 
 
@@ -1201,7 +1194,7 @@ def experiment_20(N_values=(1000, 2000, 5000, 20000),
             rej_perm = 0
 
             for _ in range(n_reps):
-                table = generate_2x2_with_mi(N, true_mi, rng)
+                table = generate_figure_2x2_with_mi(N, true_mi, rng)
 
                 # DN test (using chi-squared on G)
                 t0 = time_module.time()
@@ -1313,6 +1306,19 @@ def experiment_20(N_values=(1000, 2000, 5000, 20000),
     set_arcadia_style(ax)
 
     plt.tight_layout()
+    archived = {
+        'N_values': N_values, 'true_mi_values': true_mi_values,
+        'k_x': k_x, 'k_y': k_y, 'n_reps': n_reps, 'n_perms': n_perms,
+        'alpha': alpha, 'seed': seed,
+    }
+    for N in N_values:
+        for true_mi in true_mi_values:
+            key = f'N_{N}_mi_{true_mi:g}'.replace('.', 'p')
+            archived[f'dn_pvalues_{key}'] = results_dn[N][true_mi]['pvals']
+            archived[f'perm_pvalues_{key}'] = results_perm[N][true_mi]['pvals']
+            archived[f'dn_power_{key}'] = results_dn[N][true_mi]['power']
+            archived[f'perm_power_{key}'] = results_perm[N][true_mi]['power']
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 
@@ -1336,7 +1342,8 @@ def experiment_23(N_values=(5_000, 20_000, 100_000),
             z_values = []
 
             for _ in range(n_variants):
-                g, d, p = generate_null(N, k_x, k_z, strat_effect, noise, rng)
+                g, d, p = generate_figure_null(
+                    N, k_x, k_z, strat_effect, noise, rng)
                 tbl = build_3d_table(g, d, p, k_x, k_y, k_z)
                 mi = plugin_mi_3d(tbl)
                 z = mi_to_z_cdf(mi, k_x, k_y, k_z, N)
@@ -1412,6 +1419,19 @@ def experiment_23(N_values=(5_000, 20_000, 100_000),
 
     plt.tight_layout()
 
+    archived = {
+        'N_values': N_values, 'k_z_values': k_z_values, 'k_x': k_x,
+        'k_y': k_y, 'n_variants': n_variants, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+    }
+    for (N, k_z), result in results.items():
+        prefix = f'N_{N}_kz_{k_z}'
+        archived[f'z_values_{prefix}'] = result['z_values']
+        for name in ('mean', 'std', 'skewness', 'kurtosis', 'ks_stat',
+                     'ks_p', 'df'):
+            archived[f'{name}_{prefix}'] = result[name]
+    save_results(save_path, **archived)
+
     save_or_show(fig1, save_path)
 
 
@@ -1419,18 +1439,15 @@ def experiment_23(N_values=(5_000, 20_000, 100_000),
 # FIGURE 4: CUSTOM COMBINED FIGURE
 # =============================================================================
 
-def figure_4(save_path=None):
+def figure_4(n_variants=300, n_variants_exp5=2000, save_path=None):
     """
     Custom Figure 4: Combines exp4 right panel (left) + exp5 left panel (right).
     """
     print("  Figure 4: Custom combined figure (σ₀ consistency + df structure)...")
 
     # Parameters
-    k_x_values = (2, 3, 4, 5)
-    k_y_values = (2, 3, 4, 5)
     k_z_values = (6, 10, 20, 50, 100, 200)
     N = 100_000
-    n_variants = 300
     seed = 42
     strat_effect = 0.0
     noise = 0.0
@@ -1450,7 +1467,8 @@ def figure_4(save_path=None):
         rng2 = np.random.default_rng(seed + k_z)
         all_mi_b = []
         for _ in range(n_total):
-            g, d, p_max = generate_null(N, k_x, k_z_max, strat_effect, noise, rng2)
+            g, d, p_max = generate_figure_null(
+                N, k_x, k_z_max, strat_effect, noise, rng2)
             p_k = coarsen_partition(p_max, k_z_max, k_z)
             tbl = build_3d_table(g, d, p_k, k_x, k_y, k_z)
             mi_r = plugin_mi_3d(tbl)
@@ -1466,7 +1484,6 @@ def figure_4(save_path=None):
     # Generate data for left panel (from exp5)
     k_z_values_exp5 = (2, 3, 5, 6, 10, 15, 20, 30, 50, 100)
     N_exp5 = 10_000
-    n_variants_exp5 = 2000
     df_mi = chi2_df(k_x, k_y, 1)
     k_z_max_exp5 = max(k_z_values_exp5)
     C_exp5 = k_x * k_y * k_z_max_exp5
@@ -1564,12 +1581,52 @@ def figure_4(save_path=None):
     set_arcadia_style(ax)
 
     plt.tight_layout()
+    archived = {
+        'N': N, 'N_exp5': N_exp5, 'k_z_values': k_z_values,
+        'k_z_values_exp5': k_z_values_exp5, 'n_variants': n_variants,
+        'n_variants_exp5': n_variants_exp5, 'seed': seed,
+        'strat_effect': strat_effect, 'noise': noise,
+        'df_pred': df_pred, 'df_mean': df_mean, 'df_var': df_var,
+        'df_mle': df_mle,
+    }
+    archived.update({f'sigma0_kz_{k_z}': values
+                     for k_z, values in emp_sigma0_by_kz.items()})
+    save_results(save_path, **archived)
     save_or_show(fig, save_path)
 
 
 # =============================================================================
 # MAIN FUNCTION
 # =============================================================================
+
+def save_run_metadata(save_dir, args, effective_parameters):
+    commit = subprocess.run(
+        ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
+        check=False).stdout.strip() or None
+    dirty = bool(subprocess.run(
+        ['git', 'status', '--porcelain'], capture_output=True, text=True,
+        check=False).stdout.strip())
+    metadata = {
+        'arguments': vars(args),
+        'effective_parameters': effective_parameters,
+        'generated_at_utc': datetime.now(timezone.utc).isoformat(),
+        'git_commit': commit,
+        'git_dirty': dirty,
+        'platform': platform.platform(),
+        'python': platform.python_version(),
+        'versions': {
+            'dn_mi': dn_mi_version,
+            'matplotlib': mpl.__version__,
+            'numpy': np.__version__,
+            'scipy': scipy.__version__,
+        },
+    }
+    metadata_path = os.path.join(save_dir, 'run_metadata.json')
+    with open(metadata_path, 'w', encoding='utf-8') as handle:
+        json.dump(metadata, handle, indent=2, sort_keys=True)
+        handle.write('\n')
+    print(f"Saved run metadata to: {metadata_path}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1598,19 +1655,28 @@ def main():
         n_variants = DEFAULTS['n_variants']
         n_variants_tail = 10_000
 
+    if args.save_dir:
+        save_run_metadata(args.save_dir, args, {
+            'figure_4_n_variants': FAST['n_variants'] if args.fast else 300,
+            'figure_4_n_variants_exp5': (
+                FAST['n_variants'] if args.fast else 2000),
+            'n_variants': n_variants,
+            'n_variants_tail': n_variants_tail,
+            'n_perms': FAST['n_perms'] * 10 if args.fast else 200,
+            'n_reps': FAST['n_perm_variants'] if args.fast else 100,
+            'seed': DEFAULTS['seed'],
+        })
+
     # Helper functions to generate figures with and without legends
     def generate_fig2():
         experiment_2(
             n_variants=n_variants,
             save_path=os.path.join(args.save_dir, 'figure_2.png') if args.save_dir else None,
-            show_legend=True
+            show_legend=True,
+            no_legend_save_path=(
+                os.path.join(args.save_dir, 'figure_2_nolegend.png')
+                if args.save_dir else None)
         )
-        if args.save_dir:
-            experiment_2(
-                n_variants=n_variants,
-                save_path=os.path.join(args.save_dir, 'figure_2_nolegend.png'),
-                show_legend=False
-            )
 
     def generate_fig3():
         experiment_16(
@@ -1634,6 +1700,8 @@ def main():
         2: ('figure_2', generate_fig2),
         3: ('figure_3', generate_fig3),
         4: ('figure_4', lambda: figure_4(
+            n_variants=FAST['n_variants'] if args.fast else 300,
+            n_variants_exp5=FAST['n_variants'] if args.fast else 2000,
             save_path=os.path.join(args.save_dir, 'figure_4.png') if args.save_dir else None
         )),
         5: ('figure_5', lambda: experiment_23(
