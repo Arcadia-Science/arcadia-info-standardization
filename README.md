@@ -97,11 +97,6 @@ If you use this package in your research, please cite:
 [Citation information will be added upon publication]
 ```
 
-## Related Work
-
-For continuous data and GMM-based mutual information estimation, see:
-- [arcadia-gmm-infotheory](https://github.com/Arcadia-Science/arcadia-gmm-infotheory)
-
 ## License
 
 MIT License - see LICENSE file for details.
