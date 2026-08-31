@@ -1,6 +1,9 @@
-# DN-MI: Dimensionality Normalization for Mutual Information
+# Arcadia information theoretic standardization and parametric statistics
 
 A Python package for cross-dimensionality comparability of mutual information (MI) and conditional mutual information (CMI) using the CDF transform.
+
+This repository is associated with the pub: **A likelihood-ratio framework for inference with discrete information-theoretic measures**
+doi: 10.57844/arcadia-y5aa-6u5u
 
 ## Overview
 
@@ -93,11 +96,6 @@ If you use this package in your research, please cite:
 ```
 [Citation information will be added upon publication]
 ```
-
-## Related Work
-
-For continuous data and GMM-based mutual information estimation, see:
-- [arcadia-gmm-infotheory](https://github.com/Arcadia-Science/arcadia-gmm-infotheory)
 
 ## License
 
